@@ -1,0 +1,24 @@
+# Dependencies (installed with "npm install", no need to push)
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local instructions file, not part of the project
+CLAUDE.md
+claude.md
+
+# Ignore the example env files. The real .env files are NOT ignored,
+# so they get pushed and the project runs right after cloning.
+.env.example
