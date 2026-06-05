@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Design tokens (fixed signature). Light mode only. */
+  --color-bg: #f6f8ff;
+  --color-accent: #003f91;
+
+  --background: 222 100% 98%;        /* #F6F8FF */
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --primary: 214 100% 28%;           /* #003F91 */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214 32% 91%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 214 32% 95%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 214 100% 28%;            /* #003F91 */
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 20% 88%;
+  --input: 214 20% 88%;
+  --ring: 214 100% 28%;
+  --radius: 0.6rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: var(--color-bg);
+  color: hsl(var(--foreground));
+  font-family: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .big-number {
+  letter-spacing: -0.02em;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Signature shadow on elevated surfaces. */
+.shadow-accent {
+  box-shadow: 0 4px 14px -4px rgba(0, 63, 145, 0.25);
+}
+
+/* Small uppercase muted table headers. */
+.col-head {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+}
+
+/* --- Print rules: report only, black on white, no chrome/shadow. --- */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body {
+    background: #fff;
+  }
+  .shadow-accent,
+  [class*="shadow"] {
+    box-shadow: none !important;
+  }
+  table {
+    border-collapse: collapse;
+  }
+  th, td {
+    border: 1px solid #000;
+    color: #000;
+  }
+}
+
+.print-only {
+  display: none;
+}
