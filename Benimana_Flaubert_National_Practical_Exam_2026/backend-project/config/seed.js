@@ -11,12 +11,15 @@ const pool = require("./db");
 // multipleStatements) because the schema file holds several statements and the
 // database may not exist yet when the app first starts.
 async function initializeDatabase() {
+  const ssl =
+    process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined;
   const admin = await mysql.createConnection({
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT) || 3306,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     multipleStatements: true,
+    ssl,
   });
 
   await admin.query(
