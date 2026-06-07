@@ -1,7 +1,7 @@
 {
   "name": "vrs-backend",
   "version": "1.0.0",
-  "description": "SwiftWheels Vehicle Rental & Reservation Subsystem - backend (Node.js/Express + MySQL)",
+  "description": "SwiftWheels Vehicle Rental & Reservation Subsystem - backend (Node.js/Express + MongoDB)",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
@@ -15,7 +15,7 @@
     "express": "4.19.2",
     "express-rate-limit": "7.4.0",
     "express-session": "1.18.0",
-    "mysql2": "3.11.0"
+    "mongoose": "8.5.1"
   },
   "devDependencies": {
     "nodemon": "3.1.4"

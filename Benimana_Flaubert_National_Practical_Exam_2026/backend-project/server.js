@@ -1,11 +1,12 @@
-// VRS backend entry point: Express + cors + sessions + MySQL.
+// VRS backend entry point: Express + cors + sessions + MongoDB.
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const session = require("express-session");
 const rateLimit = require("express-rate-limit");
 
-const { initializeDatabase, seedData } = require("./config/seed");
+const connectDB = require("./config/db");
+const { seedData } = require("./config/seed");
 const requireAuth = require("./middleware/requireAuth");
 const requireAdmin = require("./middleware/requireAdmin");
 
@@ -17,7 +18,7 @@ const reportsRoutes = require("./routes/reports.routes");
 const userRoutes = require("./routes/user.routes");
 
 // --- Validate required configuration before doing anything else. ---
-const required = ["SESSION_SECRET", "DB_HOST", "DB_USER", "DB_NAME"];
+const required = ["SESSION_SECRET", "MONGODB_URI"];
 const missing = required.filter((k) => !process.env[k]);
 if (missing.length) {
   console.error("Missing required env vars: " + missing.join(", "));
@@ -65,11 +66,11 @@ app.use("/api/users", requireAuth, requireAdmin, userRoutes);
 
 app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-// --- Start: connect/create DB, create schema, seed, then listen. ---
+// --- Start: connect to MongoDB, seed, then listen. ---
 async function start() {
   try {
-    await initializeDatabase();
-    console.log(`Connected to MySQL and ensured database "${process.env.DB_NAME}".`);
+    await connectDB();
+    console.log("Connected to MongoDB.");
     await seedData();
     app.listen(PORT, () => {
       console.log(`VRS backend running on http://localhost:${PORT}`);

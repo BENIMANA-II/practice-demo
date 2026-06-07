@@ -1,143 +1,123 @@
-// Database bootstrap + idempotent seeding.
-// 1) create the VRS database if missing, 2) create the tables (schema.sql),
-// 3) seed one admin (from env) and a few sample rows owned by that admin.
-const fs = require("fs");
-const path = require("path");
-const mysql = require("mysql2/promise");
+// Idempotent seeding for MongoDB.
+// Collections and indexes are created lazily by Mongoose on first write, so there
+// is no schema step (unlike MySQL). We just seed one admin (from env) and a few
+// sample rows owned by that admin, never duplicating on restart.
 const bcrypt = require("bcryptjs");
-const pool = require("./db");
+const User = require("../models/User");
+const Customer = require("../models/Customer");
+const Vehicle = require("../models/Vehicle");
+const Reservation = require("../models/Reservation");
 
-// Step 1 + 2: create database and tables. Uses its own connection (with
-// multipleStatements) because the schema file holds several statements and the
-// database may not exist yet when the app first starts.
-async function initializeDatabase() {
-  const ssl =
-    process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined;
-  const admin = await mysql.createConnection({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT) || 3306,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    multipleStatements: true,
-    ssl,
-  });
-
-  await admin.query(
-    `CREATE DATABASE IF NOT EXISTS \`${process.env.DB_NAME}\` ` +
-      `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-  );
-  await admin.changeUser({ database: process.env.DB_NAME });
-
-  const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
-  await admin.query(schema);
-
-  // Migration: add Users.Status to databases created before the approval feature.
-  // (CREATE TABLE IF NOT EXISTS will not alter an already-existing table.)
-  const [cols] = await admin.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND LOWER(TABLE_NAME) = 'users' AND LOWER(COLUMN_NAME) = 'status'`,
-    [process.env.DB_NAME]
-  );
-  if (cols.length === 0) {
-    await admin.query(
-      "ALTER TABLE Users ADD COLUMN Status VARCHAR(20) NOT NULL DEFAULT 'pending'"
-    );
-  }
-
-  await admin.end();
-}
-
-// Step 3: seed admin + sample data. Never duplicates on restart.
 async function seedData() {
   const username = process.env.SEED_ADMIN_USERNAME || "admin";
   const password = process.env.SEED_ADMIN_PASSWORD || "change-me";
   const recoveryCode = process.env.SEED_ADMIN_RECOVERY_CODE || "1234";
 
-  const [existing] = await pool.query(
-    "SELECT User_ID FROM Users WHERE UserName = ?",
-    [username]
-  );
-
-  let adminId;
-  if (existing.length > 0) {
-    adminId = existing[0].User_ID;
-  } else {
+  // 1) Ensure the admin exists, then force it to an approved admin (covers
+  //    upgrades from older databases the same way the MySQL seed did).
+  let admin = await User.findByUsername(username);
+  if (!admin) {
     const passwordHash = await bcrypt.hash(password, 10);
     const recoveryHash = await bcrypt.hash(recoveryCode, 10);
-    const [result] = await pool.query(
-      "INSERT INTO Users (UserName, Password, Role, Status, RecoveryCodeHash) VALUES (?, ?, ?, ?, ?)",
-      [username, passwordHash, "admin", "approved", recoveryHash]
-    );
-    adminId = result.insertId;
+    admin = await User.create({ username, passwordHash, role: "admin", recoveryHash });
     console.log(`Seeded admin user "${username}".`);
   }
+  await User.approve(admin.User_ID);
+  // approve() only sets Status; make sure the role is admin too.
+  const mongoose = require("mongoose");
+  await mongoose
+    .model("User")
+    .updateOne({ User_ID: admin.User_ID }, { $set: { Role: "admin", Status: "approved" } });
+  const adminId = admin.User_ID;
 
-  // The admin is always an approved admin (covers upgrades from older databases).
-  await pool.query(
-    "UPDATE Users SET Role = 'admin', Status = 'approved' WHERE User_ID = ?",
-    [adminId]
-  );
-
-  // Sample customers
-  const [customerCount] = await pool.query(
-    "SELECT COUNT(*) AS c FROM Customer WHERE owner_id = ?",
-    [adminId]
-  );
-  if (customerCount[0].c === 0) {
-    await pool.query(
-      `INSERT INTO Customer (Full_Name, National_ID, Phone, Email, Address, owner_id)
-       VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
-      [
-        "Alice Mukamana", "1199870012345678", "0788123456", "alice@example.com", "Huye, Southern Province", adminId,
-        "Eric Niyonzima", "1198880087654321", "0722987654", "eric@example.com", "Tumba, Huye", adminId,
-      ]
+  // 2) Sample customers
+  const customerCount = await mongoose.model("Customer").countDocuments({ owner_id: adminId });
+  if (customerCount === 0) {
+    await Customer.create(
+      {
+        Full_Name: "Alice Mukamana",
+        National_ID: "1199870012345678",
+        Phone: "0788123456",
+        Email: "alice@example.com",
+        Address: "Huye, Southern Province",
+      },
+      adminId
+    );
+    await Customer.create(
+      {
+        Full_Name: "Eric Niyonzima",
+        National_ID: "1198880087654321",
+        Phone: "0722987654",
+        Email: "eric@example.com",
+        Address: "Tumba, Huye",
+      },
+      adminId
     );
   }
 
-  // Sample vehicles
-  const [vehicleCount] = await pool.query(
-    "SELECT COUNT(*) AS c FROM Vehicle WHERE owner_id = ?",
-    [adminId]
-  );
-  if (vehicleCount[0].c === 0) {
-    await pool.query(
-      `INSERT INTO Vehicle (Plate_Number, Brand, Model, Year, Vehicle_Type, Purchase_Price, Status, owner_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        "RAB 123 A", "Toyota", "RAV4", 2021, "SUV", 28000000, "Available", adminId,
-        "RAC 456 B", "Hyundai", "Tucson", 2020, "SUV", 24000000, "Available", adminId,
-      ]
+  // 3) Sample vehicles
+  const vehicleCount = await mongoose.model("Vehicle").countDocuments({ owner_id: adminId });
+  if (vehicleCount === 0) {
+    await Vehicle.create(
+      {
+        Plate_Number: "RAB 123 A",
+        Brand: "Toyota",
+        Model: "RAV4",
+        Year: 2021,
+        Vehicle_Type: "SUV",
+        Purchase_Price: 28000000,
+        Status: "Available",
+      },
+      adminId
+    );
+    await Vehicle.create(
+      {
+        Plate_Number: "RAC 456 B",
+        Brand: "Hyundai",
+        Model: "Tucson",
+        Year: 2020,
+        Vehicle_Type: "SUV",
+        Purchase_Price: 24000000,
+        Status: "Available",
+      },
+      adminId
     );
   }
 
-  // One sample reservation (dated today) linking the first customer + vehicle
-  const [rrCount] = await pool.query(
-    "SELECT COUNT(*) AS c FROM Reservation_Rental WHERE Recorded_By = ?",
-    [adminId]
-  );
-  if (rrCount[0].c === 0) {
-    const [cust] = await pool.query(
-      "SELECT Customer_ID FROM Customer WHERE owner_id = ? ORDER BY Customer_ID LIMIT 1",
-      [adminId]
-    );
-    const [veh] = await pool.query(
-      "SELECT Plate_Number FROM Vehicle WHERE owner_id = ? ORDER BY Plate_Number LIMIT 1",
-      [adminId]
-    );
-    if (cust.length && veh.length) {
+  // 4) One sample reservation (dated today) linking the first customer + vehicle
+  const rrCount = await mongoose
+    .model("ReservationRental")
+    .countDocuments({ Recorded_By: adminId });
+  if (rrCount === 0) {
+    const cust = await mongoose
+      .model("Customer")
+      .findOne({ owner_id: adminId })
+      .sort({ Customer_ID: 1 })
+      .lean();
+    const veh = await mongoose
+      .model("Vehicle")
+      .findOne({ owner_id: adminId })
+      .sort({ Plate_Number: 1 })
+      .lean();
+    if (cust && veh) {
       const today = new Date().toISOString().slice(0, 10);
-      await pool.query(
-        `INSERT INTO Reservation_Rental
-          (Customer_ID, Plate_Number, Recorded_By, Reservation_Date, Start_Date, End_Date,
-           Reservation_Status, Rental_Date, Return_Date, Rental_Fee, Rental_Status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          cust[0].Customer_ID, veh[0].Plate_Number, adminId,
-          today, today, today, "Confirmed", today, null, 150000, "Ongoing",
-        ]
+      await Reservation.create(
+        {
+          Customer_ID: cust.Customer_ID,
+          Plate_Number: veh.Plate_Number,
+          Reservation_Date: today,
+          Start_Date: today,
+          End_Date: today,
+          Reservation_Status: "Confirmed",
+          Rental_Date: today,
+          Return_Date: null,
+          Rental_Fee: 150000,
+          Rental_Status: "Ongoing",
+        },
+        adminId
       );
     }
   }
 }
 
-module.exports = { initializeDatabase, seedData };
+module.exports = { seedData };

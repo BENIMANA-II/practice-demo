@@ -1,25 +1,23 @@
-// MySQL connection pool.
-// We explicitly pass host, user, password AND database from the environment
-// so the connection step is unambiguous, then export the pool for the models.
-const mysql = require("mysql2/promise");
+// MongoDB connection via Mongoose.
+// A single MONGODB_URI carries host, credentials, database name and TLS, so the
+// same code works for a local mongod and for MongoDB Atlas (just swap the URI).
+const mongoose = require("mongoose");
 
-// Hosted MySQL providers (Aiven, TiDB, etc.) require TLS. Set DB_SSL=true to
-// enable it; left off for local development so nothing changes there.
-const ssl = process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined;
+// Fail fast on bad queries instead of silently buffering them forever.
+mongoose.set("bufferTimeoutMS", 10000);
+mongoose.set("strictQuery", true);
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT) || 3306,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl,
-  // Return DATE/DATETIME as plain "YYYY-MM-DD" strings so they are not shifted
-  // by the server timezone when serialized to JSON (Rwanda is UTC+2).
-  dateStrings: true,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-});
+async function connectDB() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error("MONGODB_URI is not set");
+  }
+  // dbName lets Atlas users keep the database out of the URI if they prefer.
+  await mongoose.connect(uri, {
+    dbName: process.env.DB_NAME || undefined,
+    serverSelectionTimeoutMS: 15000,
+  });
+  return mongoose.connection;
+}
 
-module.exports = pool;
+module.exports = connectDB;

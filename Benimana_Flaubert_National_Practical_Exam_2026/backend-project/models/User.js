@@ -1,66 +1,76 @@
-// Data-access module for Users. Returns plain objects; holds no HTTP logic.
-const pool = require("../config/db");
+// Data-access module for Users (MongoDB/Mongoose).
+// Keeps the SAME function names and return shapes the old MySQL module had, so
+// the controllers and the frontend are unaffected: User_ID stays an integer and
+// secret fields (Password, RecoveryCodeHash) are never returned by default.
+const mongoose = require("mongoose");
+const { nextSeq } = require("./Counter");
 
-// Public-safe columns (never expose Password or RecoveryCodeHash).
-const PUBLIC = "User_ID, UserName, Role, Status, created_at";
+const userSchema = new mongoose.Schema(
+  {
+    User_ID: { type: Number, unique: true, index: true },
+    UserName: { type: String, required: true, unique: true },
+    Password: { type: String, required: true },
+    Role: { type: String, default: "staff" },
+    // New accounts start 'pending' and need admin approval before they can log in.
+    Status: { type: String, default: "pending" },
+    RecoveryCodeHash: { type: String, required: true },
+    created_at: { type: Date, default: Date.now },
+  },
+  { collection: "users", versionKey: false }
+);
+
+const UserModel = mongoose.models.User || mongoose.model("User", userSchema);
+
+// Public-safe projection (never expose Password or RecoveryCodeHash).
+const PUBLIC = "-_id User_ID UserName Role Status created_at";
 
 async function findByUsername(username) {
-  const [rows] = await pool.query(
-    `SELECT ${PUBLIC} FROM Users WHERE UserName = ?`,
-    [username]
-  );
-  return rows[0] || null;
+  return UserModel.findOne({ UserName: username }).select(PUBLIC).lean();
 }
 
-// Includes secret columns — used only for bcrypt.compare during login/recovery.
+// Includes secret fields — used only for bcrypt.compare during login/recovery.
 async function findByUsernameWithSecrets(username) {
-  const [rows] = await pool.query(
-    "SELECT User_ID, UserName, Role, Status, Password, RecoveryCodeHash FROM Users WHERE UserName = ?",
-    [username]
-  );
-  return rows[0] || null;
+  return UserModel.findOne({ UserName: username })
+    .select("-_id User_ID UserName Role Status Password RecoveryCodeHash")
+    .lean();
 }
 
 // All users, newest first — used by the admin approvals page.
 async function findAll() {
-  const [rows] = await pool.query(`SELECT ${PUBLIC} FROM Users ORDER BY User_ID DESC`);
-  return rows;
+  return UserModel.find().select(PUBLIC).sort({ User_ID: -1 }).lean();
 }
 
 // Admin approves a pending account so it can log in.
 async function approve(userId) {
-  await pool.query("UPDATE Users SET Status = 'approved' WHERE User_ID = ?", [userId]);
+  await UserModel.updateOne({ User_ID: Number(userId) }, { $set: { Status: "approved" } });
   return findById(userId);
 }
 
 async function findById(id) {
-  const [rows] = await pool.query(
-    `SELECT ${PUBLIC} FROM Users WHERE User_ID = ?`,
-    [id]
-  );
-  return rows[0] || null;
+  return UserModel.findOne({ User_ID: Number(id) }).select(PUBLIC).lean();
 }
 
 async function create({ username, passwordHash, role, recoveryHash }) {
-  const [result] = await pool.query(
-    "INSERT INTO Users (UserName, Password, Role, RecoveryCodeHash) VALUES (?, ?, ?, ?)",
-    [username, passwordHash, role || "staff", recoveryHash]
-  );
-  return findById(result.insertId);
+  const User_ID = await nextSeq("users");
+  await UserModel.create({
+    User_ID,
+    UserName: username,
+    Password: passwordHash,
+    Role: role || "staff",
+    RecoveryCodeHash: recoveryHash,
+  });
+  return findById(User_ID);
 }
 
 async function updatePassword(userId, passwordHash) {
-  await pool.query("UPDATE Users SET Password = ? WHERE User_ID = ?", [
-    passwordHash,
-    userId,
-  ]);
+  await UserModel.updateOne({ User_ID: Number(userId) }, { $set: { Password: passwordHash } });
 }
 
 async function updateRecoveryHash(userId, recoveryHash) {
-  await pool.query("UPDATE Users SET RecoveryCodeHash = ? WHERE User_ID = ?", [
-    recoveryHash,
-    userId,
-  ]);
+  await UserModel.updateOne(
+    { User_ID: Number(userId) },
+    { $set: { RecoveryCodeHash: recoveryHash } }
+  );
 }
 
 module.exports = {
